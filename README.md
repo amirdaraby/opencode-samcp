@@ -11,11 +11,18 @@ The parent agent calls `opencode_run` with a prompt and a directory; opencode do
 
 ## Install / run
 
-No install step needed with `uvx`:
+The server is Python; every option below needs [uv](https://docs.astral.sh/uv/) and opencode on the machine.
 
-```bash
-uvx --from git+https://github.com/<you>/opencode-samcp opencode-samcp
-```
+| Method | Command |
+|---|---|
+| **npx** (no install) | `npx -y opencode-samcp` |
+| **npm** (global) | `npm i -g opencode-samcp` then `opencode-samcp` |
+| **uvx** from PyPI | `uvx opencode-samcp` |
+| **uvx** from GitHub | `uvx --from git+https://github.com/<you>/opencode-samcp opencode-samcp` |
+| **pip** | `pip install opencode-samcp` then `opencode-samcp` |
+
+The npm package is a thin launcher: it bundles the Python server and runs it through `uvx`.
+If `uv` or `opencode` is missing, it exits with a clear "not installed on machine" error.
 
 ## Configure your client
 
@@ -24,27 +31,26 @@ Settings → MCP Marketplace → *Add Your Own* (STDIO):
 
 | Field | Value |
 |---|---|
-| Command | `uvx` |
-| Args | `--from git+https://github.com/<you>/opencode-samcp opencode-samcp` |
+| Command | `npx` |
+| Args | `-y opencode-samcp` |
 
 Devin runs in its own VM, so opencode must be installed and logged in **there** (add it to the machine setup / snapshot).
 
 ### Codex (`~/.codex/config.toml`)
 ```toml
 [mcp_servers.opencode]
-command = "uvx"
-args = ["--from", "git+https://github.com/<you>/opencode-samcp", "opencode-samcp"]
+command = "npx"
+args = ["-y", "opencode-samcp"]
 ```
 
 ### Claude Code
 ```bash
-claude mcp add opencode -- uvx --from git+https://github.com/<you>/opencode-samcp opencode-samcp
+claude mcp add opencode -- npx -y opencode-samcp
 ```
 
 ### Generic JSON
 ```json
-{ "mcpServers": { "opencode": { "command": "uvx",
-  "args": ["--from", "git+https://github.com/<you>/opencode-samcp", "opencode-samcp"] } } }
+{ "mcpServers": { "opencode": { "command": "npx", "args": ["-y", "opencode-samcp"] } } }
 ```
 
 ### HTTP transport
@@ -83,6 +89,13 @@ There is **no authentication** and the sub-agent can edit files and run commands
 ## Notes
 
 - Job state is in-memory; it is lost when the server process restarts (opencode sessions themselves persist and can be resumed by `session_id`).
+
+## Publishing (maintainers)
+
+```bash
+npm publish            # npm / npx
+uv build && uv publish # PyPI / uvx / pip
+```
 
 ## Development
 

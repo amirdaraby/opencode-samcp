@@ -1,0 +1,10 @@
+{
+  "name": "opencode-samcp",
+  "version": "0.1.0",
+  "description": "Sub-agent MCP: let Devin, Codex, Claude Code and other agents spawn opencode sessions to do work",
+  "license": "MIT",
+  "bin": { "opencode-samcp": "bin/opencode-samcp.js" },
+  "files": ["bin", "src", "!**/__pycache__", "pyproject.toml", "README.md", "LICENSE"],
+  "keywords": ["mcp", "opencode", "subagent", "devin", "codex", "ai-agents"],
+  "engines": { "node": ">=18" }
+}

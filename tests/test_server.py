@@ -45,3 +45,23 @@ def test_check_opencode_missing(monkeypatch):
 def test_check_opencode_found(monkeypatch):
     monkeypatch.setattr(server, "OPENCODE", "sh")
     assert server.check_opencode().endswith("sh")
+
+
+async def test_fork_requires_session(tmp_path):
+    with pytest.raises(ValueError):
+        await server.opencode_run("x", str(tmp_path), fork=True)
+
+
+async def test_run_job_failure_marks_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "OPENCODE", "definitely-not-a-real-binary")
+    r = await server.opencode_run("hi", str(tmp_path), wait_seconds=5)
+    assert r["status"] == "failed" and r["errors"]
+
+
+async def test_run_job_with_fake_opencode(tmp_path, monkeypatch):
+    fake = tmp_path / "fake"
+    fake.write_text('#!/bin/sh\necho \'{"type":"text","sessionID":"ses_x","part":{"text":"done"}}\'\n')
+    fake.chmod(0o755)
+    monkeypatch.setattr(server, "OPENCODE", str(fake))
+    r = await server.opencode_run("hi", str(tmp_path), wait_seconds=10)
+    assert r["status"] == "completed" and r["session_id"] == "ses_x" and r["final_text"] == "done"

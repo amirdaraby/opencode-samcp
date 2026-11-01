@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import sys
 import time
 import uuid
@@ -16,6 +17,7 @@ DEFAULT_MODEL = os.environ.get("OPENCODE_MODEL")  # unset -> opencode's configur
 
 mcp = FastMCP("opencode-samcp")
 JOBS: dict[str, dict] = {}
+MAX_JOBS = int(os.environ.get("OPENCODE_MAX_JOBS", "200"))  # finished jobs beyond this are evicted
 
 
 def _clip(s, n):
@@ -66,28 +68,50 @@ def _handle_event(job, ev):
 
 
 async def _run_job(job, args):
-    proc = await asyncio.create_subprocess_exec(
-        OPENCODE, *args, cwd=job["directory"],
-        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        limit=16 * 1024 * 1024,
-    )
-    job["proc"] = proc
-    stderr_task = asyncio.create_task(proc.stderr.read())
-    async for raw in proc.stdout:
-        line = raw.decode(errors="replace").strip()
-        if not line:
-            continue
-        try:
-            _handle_event(job, json.loads(line))
-        except json.JSONDecodeError:
-            job["errors"].append(_clip(line, 500))
-    job["exit_code"] = await proc.wait()
-    stderr = (await stderr_task).decode(errors="replace").strip()
-    if job["exit_code"] != 0 and stderr:
-        job["errors"].append(_clip(stderr, 2000))
-    if job["status"] == "running":
-        job["status"] = "failed" if job["exit_code"] != 0 or (job["errors"] and not job["texts"]) else "completed"
-    job["finished"] = time.time()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            OPENCODE, *args, cwd=job["directory"],
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            limit=16 * 1024 * 1024, start_new_session=True,
+        )
+        job["proc"] = proc
+        stderr_task = asyncio.create_task(proc.stderr.read())
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").strip()
+            if not line:
+                continue
+            try:
+                _handle_event(job, json.loads(line))
+            except json.JSONDecodeError:
+                job["errors"].append(_clip(line, 500))
+        job["exit_code"] = await proc.wait()
+        stderr = (await stderr_task).decode(errors="replace").strip()
+        if job["exit_code"] != 0 and stderr:
+            job["errors"].append(_clip(stderr, 2000))
+        if job["status"] == "running":
+            job["status"] = "failed" if job["exit_code"] != 0 or (job["errors"] and not job["texts"]) else "completed"
+    except Exception as e:  # noqa: BLE001 - surface any failure on the job instead of hanging
+        job["errors"].append(f"{type(e).__name__}: {e}")
+        if job["status"] == "running":
+            job["status"] = "failed"
+        proc = job.get("proc")
+        if proc and proc.returncode is None:
+            _kill_group(proc, signal.SIGKILL)
+    finally:
+        job["finished"] = time.time()
+
+
+def _kill_group(proc, sig):
+    try:
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _evict_old_jobs():
+    done = [j for j in JOBS.values() if j["status"] != "running"]
+    for j in sorted(done, key=lambda j: j["finished"] or 0)[: max(0, len(JOBS) - MAX_JOBS)]:
+        JOBS.pop(j["id"], None)
 
 
 def _report(job, full=True):
@@ -143,6 +167,8 @@ async def opencode_run(
     `model` is "provider/model"; defaults to opencode's configured model.
     Returns the session_id, opencode's final message, a summary of tool calls, errors, and usage.
     """
+    if fork and not session_id:
+        raise ValueError("fork=True requires session_id")
     d = _resolve_dir(directory)
     args = ["run", "--format", "json"]
     if auto_approve:
@@ -172,6 +198,7 @@ async def opencode_run(
     }
     job["task"] = asyncio.create_task(_run_job(job, args))
     JOBS[job["id"]] = job
+    _evict_old_jobs()
     await _wait(job, wait_seconds)
     return _report(job)
 
@@ -201,11 +228,12 @@ async def opencode_cancel(job_id: str) -> dict:
         raise ValueError(f"unknown job_id {job_id}")
     if job["status"] == "running" and job["proc"] and job["proc"].returncode is None:
         job["status"] = "cancelled"
-        job["proc"].terminate()
+        _kill_group(job["proc"], signal.SIGTERM)
         try:
             await asyncio.wait_for(asyncio.shield(job["task"]), timeout=10)
         except asyncio.TimeoutError:
-            job["proc"].kill()
+            _kill_group(job["proc"], signal.SIGKILL)
+            await job["task"]
     return _report(job, full=False)
 
 
@@ -276,6 +304,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765, help="port for HTTP transports")
     args = parser.parse_args()
     check_opencode()
+    if args.transport != "stdio" and args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"WARNING: serving unauthenticated MCP on {args.host}:{args.port}; anyone who can reach it "
+              "can run commands on this machine. Use localhost or an authenticated proxy.", file=sys.stderr)
     mcp.settings.host = args.host
     mcp.settings.port = args.port
     mcp.run(transport=args.transport)
