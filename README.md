@@ -18,7 +18,7 @@ The server is Python; every option below needs [uv](https://docs.astral.sh/uv/) 
 | **npx** (no install) | `npx -y opencode-samcp` |
 | **npm** (global) | `npm i -g opencode-samcp` then `opencode-samcp` |
 | **uvx** from PyPI | `uvx opencode-samcp` |
-| **uvx** from GitHub | `uvx --from git+https://github.com/<you>/opencode-samcp opencode-samcp` |
+| **uvx** from GitHub | `uvx --from git+https://github.com/amirdaraby/opencode-samcp opencode-samcp` |
 | **pip** | `pip install opencode-samcp` then `opencode-samcp` |
 
 The npm package is a thin launcher: it bundles the Python server and runs it through `uvx`.

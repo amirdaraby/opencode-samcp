@@ -14,6 +14,11 @@ classifiers = [
 ]
 keywords = ["mcp", "opencode", "subagent", "devin", "codex", "ai-agents"]
 
+[project.urls]
+Homepage = "https://github.com/amirdaraby/opencode-samcp"
+Repository = "https://github.com/amirdaraby/opencode-samcp"
+Issues = "https://github.com/amirdaraby/opencode-samcp/issues"
+
 [project.scripts]
 opencode-samcp = "opencode_samcp.server:main"
 
