@@ -92,10 +92,13 @@ There is **no authentication** and the sub-agent can edit files and run commands
 
 ## Publishing (maintainers)
 
+Releases are automated: pushing a `vX.Y.Z` tag runs `.github/workflows/publish.yml`, which publishes to PyPI and npm (both via trusted publishing, no tokens). Use the helper so versions and tag never drift apart:
+
 ```bash
-npm publish            # npm / npx
-uv build && uv publish # PyPI / uvx / pip
+scripts/release.sh 0.0.4
 ```
+
+It bumps `pyproject.toml`, `package.json` and `uv.lock`, runs the tests, commits, pushes `main`, then tags and pushes `v0.0.4`.
 
 ## Development
 
