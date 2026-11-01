@@ -1,6 +1,6 @@
 [project]
 name = "opencode-samcp"
-version = "0.0.1"
+version = "0.0.2"
 description = "Sub-agent MCP: let Devin, Codex, Claude Code and other agents spawn opencode sessions to do work"
 readme = "README.md"
 license = { text = "MIT" }
