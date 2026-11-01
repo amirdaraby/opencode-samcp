@@ -1,0 +1,46 @@
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Tag, package.json and pyproject.toml versions must match
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          NPM_V=$(node -p "require('./package.json').version")
+          PY_V=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "tag=$TAG npm=$NPM_V pypi=$PY_V"
+          [ "$TAG" = "$NPM_V" ] && [ "$TAG" = "$PY_V" ] || { echo "version mismatch"; exit 1; }
+      - run: uv run --group dev pytest
+
+  pypi:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv publish --trusted-publishing always
+
+  npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
