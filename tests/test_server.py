@@ -33,3 +33,15 @@ async def test_tools_registered():
 async def test_unknown_job():
     with pytest.raises(ValueError):
         await server.opencode_job("missing")
+
+
+def test_check_opencode_missing(monkeypatch):
+    monkeypatch.setattr(server, "OPENCODE", "definitely-not-a-real-binary")
+    with pytest.raises(SystemExit) as e:
+        server.check_opencode()
+    assert "opencode not installed on machine" in str(e.value)
+
+
+def test_check_opencode_found(monkeypatch):
+    monkeypatch.setattr(server, "OPENCODE", "sh")
+    assert server.check_opencode().endswith("sh")

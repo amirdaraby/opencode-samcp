@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
+import sys
 import time
 import uuid
 
@@ -255,12 +257,25 @@ async def opencode_delete_session(session_id: str, directory: str) -> str:
     return f"deleted {session_id}"
 
 
+def check_opencode() -> str:
+    """Return the resolved opencode binary path, or exit with a clear error if it is missing."""
+    path = shutil.which(OPENCODE)
+    if not path:
+        sys.exit(
+            f"opencode-samcp failed: opencode not installed on machine "
+            f"('{OPENCODE}' not found on PATH). Install it from https://opencode.ai "
+            f"or set OPENCODE_BIN to its path."
+        )
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="opencode-samcp", description=__doc__)
     parser.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default="stdio")
     parser.add_argument("--host", default="127.0.0.1", help="bind address for HTTP transports")
     parser.add_argument("--port", type=int, default=8765, help="port for HTTP transports")
     args = parser.parse_args()
+    check_opencode()
     mcp.settings.host = args.host
     mcp.settings.port = args.port
     mcp.run(transport=args.transport)
