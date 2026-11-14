@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import re
 import time
 
 import pytest
@@ -57,6 +58,16 @@ def test_handle_event_text_upserts_by_part_id():
     server._handle_event(job, {"type": "text", "part": {"text": "a"}})
     server._handle_event(job, {"type": "text", "part": {"text": "b"}})
     assert job["texts"] == ["hello", "world", "a", "b"]
+
+
+def test_last_activity_shows_elapsed_since_tool():
+    job = _new_job()
+    job["tools"].append({"tool": "bash", "status": "completed", "input": {"command": "ls"},
+                         "output": "", "ts": int(time.time() * 1000) - 5000})
+    s = server._last_activity(job)
+    assert s.startswith("bash:")
+    m = re.search(r"(\d+(?:\.\d+)?)s ago$", s)
+    assert m and 4.5 <= float(m.group(1)) <= 5.6
 
 
 def test_handle_event_tool_entry_carries_timestamp():
