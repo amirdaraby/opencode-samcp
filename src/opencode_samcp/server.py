@@ -354,7 +354,8 @@ async def opencode_progress(job_id: str, tail: int = 0) -> dict:
     Reports what's done (recent completed tool calls), what's happening now (phase + last
     activity), and what the agent says is next (its latest message). Also: elapsed time,
     step/tool-call counts, tokens, cost, and a stall flag (no stream events for
-    OPENCODE_STALL_SECONDS, default 90s). tail=N additionally returns the last N stream events.
+    OPENCODE_STALL_SECONDS, default 90s). tail=N additionally returns the last N stream
+    events (at most 50, the server's ring-buffer size).
     Use opencode_job for the full report with complete tool-call details."""
     job = JOBS.get(job_id)
     if not job:
