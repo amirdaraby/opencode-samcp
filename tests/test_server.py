@@ -267,6 +267,26 @@ async def test_stall_during_live_job(monkeypatch):
         server.JOBS.pop("j7", None)
 
 
+def test_evict_prefers_finished_then_oldest_running(monkeypatch):
+    monkeypatch.setattr(server, "MAX_JOBS", 2)
+    finished = _new_job("f1")
+    finished["status"] = "completed"
+    finished["finished"] = time.time()
+    r_old = _new_job("r_old")
+    r_old["started"] = time.time() - 90
+    r_mid = _new_job("r_mid")
+    r_mid["started"] = time.time() - 20
+    r_new = _new_job("r_new")
+    r_new["started"] = time.time() - 10
+    server.JOBS.update({"f1": finished, "r_old": r_old, "r_mid": r_mid, "r_new": r_new})
+    try:
+        server._evict_old_jobs()  # 4 jobs, cap 2 -> evict finished f1, then oldest running r_old
+        assert set(server.JOBS) == {"r_mid", "r_new"}
+    finally:
+        for k in ("f1", "r_old", "r_mid", "r_new"):
+            server.JOBS.pop(k, None)
+
+
 async def test_cancel_with_missing_proc_marks_cancelled():
     job = _new_job("j8")
     server.JOBS["j8"] = job

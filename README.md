@@ -91,6 +91,7 @@ There is **no authentication** and the sub-agent can edit files and run commands
 ## Notes
 
 - Job state is in-memory; it is lost when the server process restarts (opencode sessions themselves persist and can be resumed by `session_id`).
+- When more than `OPENCODE_MAX_JOBS` (default 200) jobs exist, the oldest finished jobs are evicted from the table — and, if there are not enough finished ones, the oldest running. Evicted jobs keep running; they just can no longer be looked up by `job_id` (resume by `session_id` instead).
 
 ## Publishing (maintainers)
 

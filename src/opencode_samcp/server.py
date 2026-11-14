@@ -217,8 +217,17 @@ def _kill_group(proc, sig):
 
 
 def _evict_old_jobs():
-    done = [j for j in JOBS.values() if j["status"] != "running"]
-    for j in sorted(done, key=lambda j: j["finished"] or 0)[: max(0, len(JOBS) - MAX_JOBS)]:
+    """Keep JOBS at or below MAX_JOBS: evict finished jobs first, then the oldest running."""
+    excess = max(0, len(JOBS) - MAX_JOBS)
+    if not excess:
+        return
+    victims = sorted((j for j in JOBS.values() if j["status"] != "running"),
+                     key=lambda j: j["finished"] or 0)
+    if len(victims) < excess:
+        running = sorted((j for j in JOBS.values() if j["status"] == "running"),
+                         key=lambda j: j["started"])
+        victims += running[: excess - len(victims)]
+    for j in victims:
         JOBS.pop(j["id"], None)
 
 
