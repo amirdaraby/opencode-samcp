@@ -15,6 +15,7 @@ from mcp.server.fastmcp import Context, FastMCP
 OPENCODE = os.environ.get("OPENCODE_BIN", "opencode")
 DEFAULT_MODEL = os.environ.get("OPENCODE_MODEL")  # unset -> opencode's configured default
 STALL_SECONDS = int(os.environ.get("OPENCODE_STALL_SECONDS", "90"))  # no stream events for this long = stalled
+TICK_SECONDS = 5.0  # cadence for report_progress ticks while waiting on a job
 
 mcp = FastMCP("opencode-samcp")
 JOBS: dict[str, dict] = {}
@@ -249,7 +250,7 @@ async def _wait_with_progress(job, wait_seconds, report=None):
         if remaining <= 0:
             break
         try:
-            await asyncio.wait_for(asyncio.shield(job["task"]), timeout=min(5.0, remaining))
+            await asyncio.wait_for(asyncio.shield(job["task"]), timeout=min(TICK_SECONDS, remaining))
             break
         except asyncio.TimeoutError:
             pass

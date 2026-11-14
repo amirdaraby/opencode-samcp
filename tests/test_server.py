@@ -190,6 +190,51 @@ async def test_wait_with_progress_returns_when_done():
     assert reports == []
 
 
+async def test_wait_with_progress_multiple_ticks(monkeypatch):
+    monkeypatch.setattr(server, "TICK_SECONDS", 0.2)
+    job = _new_job("j5")
+    async def _slow():
+        await asyncio.sleep(5)
+    job["task"] = asyncio.create_task(_slow())
+    reports = []
+
+    async def report(tick, phase):
+        reports.append(tick)
+
+    try:
+        await server._wait_with_progress(job, 0.9, report)
+        # several 0.2s ticks before the 0.9s deadline, monotonically increasing
+        assert len(reports) >= 3
+        assert reports == sorted(reports) and len(set(reports)) == len(reports)
+        assert job["status"] == "running"  # deadline hit, job still running
+    finally:
+        job["task"].cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await job["task"]
+
+
+async def test_wait_with_progress_returns_on_mid_tick_completion(monkeypatch):
+    monkeypatch.setattr(server, "TICK_SECONDS", 0.2)
+    job = _new_job("j6")
+
+    async def _finishes():
+        await asyncio.sleep(0.35)
+        job["status"] = "completed"
+        job["finished"] = time.time()
+
+    job["task"] = asyncio.create_task(_finishes())
+    reports = []
+
+    async def report(tick, phase):
+        reports.append(tick)
+
+    t0 = time.time()
+    await server._wait_with_progress(job, 10, report)
+    assert reports == [1]
+    assert job["status"] == "completed"
+    assert time.time() - t0 < 1.0  # woke on completion, not on the next tick
+
+
 async def test_stall_during_live_job(monkeypatch):
     monkeypatch.setattr(server, "STALL_SECONDS", 0.3)
     job = _new_job("j7")
