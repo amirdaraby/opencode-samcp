@@ -10,14 +10,16 @@ import sys
 import time
 import uuid
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 OPENCODE = os.environ.get("OPENCODE_BIN", "opencode")
 DEFAULT_MODEL = os.environ.get("OPENCODE_MODEL")  # unset -> opencode's configured default
+STALL_SECONDS = int(os.environ.get("OPENCODE_STALL_SECONDS", "90"))  # no stream events for this long = stalled
 
 mcp = FastMCP("opencode-samcp")
 JOBS: dict[str, dict] = {}
 MAX_JOBS = int(os.environ.get("OPENCODE_MAX_JOBS", "200"))  # finished jobs beyond this are evicted
+_PHASES = {"step_start": "thinking", "text": "writing", "tool_use": "working"}
 
 
 def _clip(s, n):
@@ -47,8 +49,17 @@ def _handle_event(job, ev):
     job["session_id"] = job["session_id"] or ev.get("sessionID")
     part = ev.get("part") or {}
     kind = ev.get("type")
+    job["last_event_at"] = time.time()
+    job["last_event_type"] = kind
     if kind == "text" and part.get("text", "").strip():
-        job["texts"].append(part["text"].strip())
+        # streamed text parts are re-emitted with the same id: update in place
+        tid = part.get("id")
+        if tid and tid in job["text_index"]:
+            job["texts"][job["text_index"][tid]] = part["text"].strip()
+        else:
+            if tid:
+                job["text_index"][tid] = len(job["texts"])
+            job["texts"].append(part["text"].strip())
     elif kind == "tool_use":
         st = part.get("state") or {}
         job["tools"].append({
@@ -56,15 +67,105 @@ def _handle_event(job, ev):
             "status": st.get("status"),
             "input": _clip(st.get("input"), 300),
             "output": _clip(st.get("output") or "", 300),
+            "ts": ev.get("timestamp"),
         })
+    elif kind == "step_start":
+        job["steps"] += 1
     elif kind == "step_finish":
         tok = part.get("tokens") or {}
         job["tokens"]["input"] += tok.get("input", 0)
         job["tokens"]["output"] += tok.get("output", 0)
         job["cost"] += part.get("cost") or 0
+        job["step_reason"] = part.get("reason")
     elif kind == "error":
         err = ev.get("error") or {}
         job["errors"].append(err.get("message") or json.dumps(err))
+    job["events"].append(_event_summary(kind, ev, part))
+    del job["events"][: max(0, len(job["events"]) - 50)]  # ring buffer, newest last
+
+
+def _event_summary(kind, ev, part):
+    ts = ev.get("timestamp")
+    entry = {"at": round(ts / 1000, 3) if ts else None, "type": kind}
+    if kind == "tool_use":
+        st = part.get("state") or {}
+        entry["summary"] = f"{part.get('tool')}: {_clip(json.dumps(st.get('input')), 100)} [{st.get('status')}]"
+    elif kind == "text":
+        entry["summary"] = _clip(part.get("text", ""), 300)
+    elif kind == "step_finish":
+        entry["summary"] = f"reason={part.get('reason')} cost={part.get('cost')}"
+    elif kind == "error":
+        err = ev.get("error") or {}
+        entry["summary"] = _clip(err.get("message") or json.dumps(err), 300)
+    else:
+        entry["summary"] = ""
+    return entry
+
+
+def _new_job(jid, directory, title, session_id):
+    now = time.time()
+    return {
+        "id": jid, "status": "running", "directory": directory, "title": title,
+        "session_id": session_id, "texts": [], "text_index": {}, "tools": [], "errors": [],
+        "tokens": {"input": 0, "output": 0}, "cost": 0.0, "exit_code": None,
+        "steps": 0, "step_reason": None, "events": [],
+        "started": now, "finished": None, "last_event_at": now, "last_event_type": None,
+        "proc": None,
+    }
+
+
+def _phase(job):
+    if job["status"] != "running":
+        return job["status"]
+    if time.time() - job["last_event_at"] > STALL_SECONDS:
+        return "stalled"
+    return _PHASES.get(job["last_event_type"] or "", "working")
+
+
+def _last_activity(job):
+    if job["tools"]:
+        t = job["tools"][-1]
+        s = f"{t['tool']}: {_clip(t.get('input'), 100)} — {t['status']}"
+        if t.get("ts"):
+            s += f" {round(time.time() - t['ts'] / 1000, 1)}s ago"
+        return s
+    if job["texts"]:
+        return f"assistant: {_clip(job['texts'][-1], 100)}"
+    return "started"
+
+
+def _progress(job):
+    """Compact progress snapshot of a job: what's done, what's happening now, what the agent
+    says is next, plus counts and usage. Kept small on purpose — it is polled by LLMs."""
+    now = time.time()
+    stalled = job["status"] == "running" and now - job["last_event_at"] > STALL_SECONDS
+    done = []
+    for t in job["tools"][-8:]:
+        line = f"{t['tool']}: {_clip(t.get('input'), 80)}"
+        if t["status"] != "completed":
+            line += f" [{t['status']}]"
+        done.append(line)
+    return {
+        "job_id": job["id"],
+        "status": job["status"],
+        "session_id": job["session_id"],
+        "elapsed_s": round((job["finished"] or now) - job["started"], 1),
+        "steps": job["steps"],
+        "tool_calls": {
+            "total": len(job["tools"]),
+            "completed": sum(1 for t in job["tools"] if t["status"] == "completed"),
+            "failed": sum(1 for t in job["tools"] if t["status"] == "error"),
+        },
+        "done": done,
+        "doing": _last_activity(job),
+        "next": _clip(job["texts"][-1], 300) if job["texts"] else "",
+        "phase": _phase(job),
+        "stalled": stalled,
+        "last_event_ago_s": round(now - job["last_event_at"], 1),
+        "tokens": job["tokens"],
+        "cost": round(job["cost"], 4),
+        "error": _clip(job["errors"][-1], 200) if job["errors"] else None,
+    }
 
 
 async def _run_job(job, args):
@@ -137,15 +238,30 @@ def _report(job, full=True):
     return r
 
 
-async def _wait(job, wait_seconds):
-    try:
-        await asyncio.wait_for(asyncio.shield(job["task"]), timeout=max(wait_seconds, 0))
-    except asyncio.TimeoutError:
-        pass
+async def _wait_with_progress(job, wait_seconds, report=None):
+    """Race the job against the deadline, calling report(tick, phase) on each ~5s tick."""
+    deadline = time.time() + max(wait_seconds, 0)
+    tick = 0
+    while job["status"] == "running":
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        try:
+            await asyncio.wait_for(asyncio.shield(job["task"]), timeout=min(5.0, remaining))
+            break
+        except asyncio.TimeoutError:
+            pass
+        tick += 1
+        if report:
+            try:
+                await report(tick, _phase(job))
+            except Exception:  # noqa: BLE001 - progress reporting must never kill the job
+                pass
 
 
 @mcp.tool()
 async def opencode_run(
+    ctx: Context,
     prompt: str,
     directory: str,
     session_id: str | None = None,
@@ -161,8 +277,11 @@ async def opencode_run(
 
     Starts a new opencode session, or continues `session_id` (with `fork=True`, branches it first).
     Waits up to `wait_seconds` for completion; if still running, returns status "running" with a
-    job_id — poll it with opencode_job. Use wait_seconds=0 to start in the background and run
-    several sessions in parallel (use separate git worktrees so they don't clash).
+    job_id — poll it with opencode_progress (compact snapshot: what's done, doing, next) or
+    opencode_job (full report). While this call is waiting, clients that send an MCP progress
+    token receive live updates (this also keeps very long waits from timing out). Use
+    wait_seconds=0 to start in the background and run several sessions in parallel (use separate
+    git worktrees so they don't clash).
     `auto_approve` lets opencode edit files/run commands without asking (required for headless use).
     `model` is "provider/model"; defaults to opencode's configured model.
     Returns the session_id, opencode's final message, a summary of tool calls, errors, and usage.
@@ -190,28 +309,44 @@ async def opencode_run(
     # stops a prompt starting with "-" from being parsed as a flag.
     args.append(" " + prompt if prompt.startswith("-") else prompt)
 
-    job = {
-        "id": uuid.uuid4().hex[:8], "status": "running", "directory": d, "title": title,
-        "session_id": None if fork else session_id, "texts": [], "tools": [], "errors": [],
-        "tokens": {"input": 0, "output": 0}, "cost": 0.0, "exit_code": None,
-        "started": time.time(), "finished": None, "proc": None,
-    }
+    job = _new_job(uuid.uuid4().hex[:8], d, title, None if fork else session_id)
     job["task"] = asyncio.create_task(_run_job(job, args))
     JOBS[job["id"]] = job
     _evict_old_jobs()
-    await _wait(job, wait_seconds)
+    await _wait_with_progress(job, wait_seconds,
+                              lambda t, p: ctx.report_progress(t, message=f"{job['steps']} steps, {len(job['tools'])} tool calls, {p}"))
     return _report(job)
 
 
 @mcp.tool()
-async def opencode_job(job_id: str, wait_seconds: int = 0) -> dict:
-    """Get the status/result of an opencode_run job, optionally waiting up to `wait_seconds` for it to finish."""
+async def opencode_job(ctx: Context, job_id: str, wait_seconds: int = 0) -> dict:
+    """Get the full status/result of an opencode_run job, optionally waiting up to `wait_seconds`
+    for it to finish. For a compact mid-run snapshot (what's done/doing/next) use opencode_progress."""
     job = JOBS.get(job_id)
     if not job:
         raise ValueError(f"unknown job_id {job_id}")
     if job["status"] == "running" and wait_seconds > 0:
-        await _wait(job, wait_seconds)
+        await _wait_with_progress(job, wait_seconds,
+                                  lambda t, p: ctx.report_progress(t, message=f"{job['steps']} steps, {len(job['tools'])} tool calls, {p}"))
     return _report(job)
+
+
+@mcp.tool()
+async def opencode_progress(job_id: str, tail: int = 0) -> dict:
+    """Compact progress snapshot of a job, cheap to poll while it runs.
+
+    Reports what's done (recent completed tool calls), what's happening now (phase + last
+    activity), and what the agent says is next (its latest message). Also: elapsed time,
+    step/tool-call counts, tokens, cost, and a stall flag (no stream events for
+    OPENCODE_STALL_SECONDS, default 90s). tail=N additionally returns the last N stream events.
+    Use opencode_job for the full report with complete tool-call details."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise ValueError(f"unknown job_id {job_id}")
+    r = _progress(job)
+    if tail > 0:
+        r["events"] = job["events"][-tail:]
+    return r
 
 
 @mcp.tool()

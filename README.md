@@ -67,6 +67,7 @@ There is **no authentication** and the sub-agent can edit files and run commands
 |---|---|
 | `opencode_run` | Start a session (or continue `session_id`, optionally `fork`) in `directory`. Waits up to `wait_seconds` (default 600); `0` runs in the background. Supports `model`, `agent`, `title`, `files`, `auto_approve`. |
 | `opencode_job` | Poll/wait on a background job by `job_id`. |
+| `opencode_progress` | Compact progress snapshot of a job: elapsed time, what's done, what's doing, what's next, stall flag. `tail` adds recent events. |
 | `opencode_jobs` | List jobs started by this server. |
 | `opencode_cancel` | Stop a running job (session is kept). |
 | `opencode_sessions` | List opencode sessions for a project directory. |
@@ -81,6 +82,7 @@ There is **no authentication** and the sub-agent can edit files and run commands
 |---|---|
 | `OPENCODE_BIN` | Path to the opencode binary (default `opencode`) |
 | `OPENCODE_MODEL` | Default `provider/model` when the caller doesn't pass one |
+| `OPENCODE_STALL_SECONDS` | Seconds without stream events before a running job is reported as `stalled` (default 90) |
 
 ## Security
 
