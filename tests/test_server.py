@@ -88,6 +88,14 @@ def test_handle_event_tool_entry_carries_timestamp():
     assert job["tools"][0]["ts"] == 12345
 
 
+def test_handle_event_null_text_is_ignored():
+    job = _new_job()
+    server._handle_event(job, {"type": "text", "part": {"id": "p1", "text": None}})
+    assert job["texts"] == []
+    assert job["events"][0]["summary"] == ""
+    assert job["errors"] == []
+
+
 def test_events_ring_buffer_capped_at_50():
     job = _new_job()
     for i in range(60):

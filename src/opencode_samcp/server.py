@@ -52,15 +52,17 @@ def _handle_event(job, ev):
     kind = ev.get("type")
     job["last_event_at"] = time.time()
     job["last_event_type"] = kind
-    if kind == "text" and part.get("text", "").strip():
-        # streamed text parts are re-emitted with the same id: update in place
-        tid = part.get("id")
-        if tid and tid in job["text_index"]:
-            job["texts"][job["text_index"][tid]] = part["text"].strip()
-        else:
-            if tid:
-                job["text_index"][tid] = len(job["texts"])
-            job["texts"].append(part["text"].strip())
+    if kind == "text":
+        text = part.get("text")  # may be null in malformed events
+        if text and text.strip():
+            # streamed text parts are re-emitted with the same id: update in place
+            tid = part.get("id")
+            if tid and tid in job["text_index"]:
+                job["texts"][job["text_index"][tid]] = text.strip()
+            else:
+                if tid:
+                    job["text_index"][tid] = len(job["texts"])
+                job["texts"].append(text.strip())
     elif kind == "tool_use":
         st = part.get("state") or {}
         job["tools"].append({
@@ -92,7 +94,7 @@ def _event_summary(kind, ev, part, job):
         st = part.get("state") or {}
         entry["summary"] = f"{part.get('tool')}: {_clip(json.dumps(st.get('input')), 100)} [{st.get('status')}]"
     elif kind == "text":
-        entry["summary"] = _clip(part.get("text", ""), 300)
+        entry["summary"] = _clip(part.get("text") or "", 300)
     elif kind == "step_finish":
         entry["summary"] = f"reason={part.get('reason')} cost={part.get('cost')}"
     elif kind == "step_start":
