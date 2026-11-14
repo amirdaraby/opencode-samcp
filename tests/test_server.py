@@ -83,9 +83,10 @@ def test_last_activity_shows_elapsed_since_tool():
 
 def test_handle_event_tool_entry_carries_timestamp():
     job = _new_job()
-    server._handle_event(job, {"type": "tool_use", "timestamp": 12345,
+    ts = int(time.time() * 1000) - 5000
+    server._handle_event(job, {"type": "tool_use", "timestamp": ts,
                                "part": {"tool": "bash", "state": {"status": "completed", "input": {"c": 1}, "output": "ok"}}})
-    assert job["tools"][0]["ts"] == 12345
+    assert job["tools"][0]["ts"] == ts
 
 
 def test_handle_event_null_text_is_ignored():
