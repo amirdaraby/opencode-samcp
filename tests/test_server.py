@@ -190,6 +190,19 @@ async def test_wait_with_progress_returns_when_done():
     assert reports == []
 
 
+async def test_stall_during_live_job(monkeypatch):
+    monkeypatch.setattr(server, "STALL_SECONDS", 0.3)
+    job = _new_job("j7")
+    server.JOBS["j7"] = job
+    try:
+        assert (await server.opencode_progress("j7"))["stalled"] is False
+        await asyncio.sleep(0.4)  # let a running job go quiet
+        r = await server.opencode_progress("j7")
+        assert r["stalled"] is True and r["phase"] == "stalled"
+    finally:
+        server.JOBS.pop("j7", None)
+
+
 async def test_cancel_with_missing_proc_marks_cancelled():
     job = _new_job("j8")
     server.JOBS["j8"] = job
