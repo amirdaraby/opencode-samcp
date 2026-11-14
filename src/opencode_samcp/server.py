@@ -139,7 +139,7 @@ def _progress(job):
     """Compact progress snapshot of a job: what's done, what's happening now, what the agent
     says is next, plus counts and usage. Kept small on purpose — it is polled by LLMs."""
     now = time.time()
-    stalled = job["status"] == "running" and now - job["last_event_at"] > STALL_SECONDS
+    phase = _phase(job)
     done = []
     for t in job["tools"][-8:]:
         line = f"{t['tool']}: {_clip(t.get('input'), 80)}"
@@ -160,8 +160,8 @@ def _progress(job):
         "done": done,
         "doing": _last_activity(job),
         "next": _clip(job["texts"][-1], 300) if job["texts"] else "",
-        "phase": _phase(job),
-        "stalled": stalled,
+        "phase": phase,
+        "stalled": phase == "stalled",
         "last_event_ago_s": round(now - job["last_event_at"], 1),
         "tokens": job["tokens"],
         "cost": round(job["cost"], 4),
