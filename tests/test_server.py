@@ -190,6 +190,21 @@ async def test_wait_with_progress_returns_when_done():
     assert reports == []
 
 
+async def test_cancel_with_missing_proc_marks_cancelled():
+    job = _new_job("j8")
+    server.JOBS["j8"] = job
+
+    async def _startup_fails():
+        await asyncio.sleep(0.05)  # _run_job never gets a proc
+
+    job["task"] = asyncio.create_task(_startup_fails())
+    try:
+        r = await server.opencode_cancel("j8")
+        assert r["status"] == "cancelled"  # not stuck "running"
+    finally:
+        server.JOBS.pop("j8", None)
+
+
 def test_resolve_dir_rejects_missing(tmp_path):
     assert server._resolve_dir(str(tmp_path)) == str(tmp_path)
     with pytest.raises(ValueError):

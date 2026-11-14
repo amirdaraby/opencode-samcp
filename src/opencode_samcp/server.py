@@ -176,6 +176,8 @@ async def _run_job(job, args):
             limit=16 * 1024 * 1024, start_new_session=True,
         )
         job["proc"] = proc
+        if job["status"] == "cancelled":  # cancel landed before the process was visible
+            _kill_group(proc, signal.SIGKILL)
         stderr_task = asyncio.create_task(proc.stderr.read())
         async for raw in proc.stdout:
             line = raw.decode(errors="replace").strip()
@@ -361,13 +363,18 @@ async def opencode_cancel(job_id: str) -> dict:
     job = JOBS.get(job_id)
     if not job:
         raise ValueError(f"unknown job_id {job_id}")
-    if job["status"] == "running" and job["proc"] and job["proc"].returncode is None:
+    if job["status"] == "running":
         job["status"] = "cancelled"
-        _kill_group(job["proc"], signal.SIGTERM)
+        # proc may not exist yet; _run_job kills it once it does
+        proc = job.get("proc")
+        if proc and proc.returncode is None:
+            _kill_group(proc, signal.SIGTERM)
         try:
             await asyncio.wait_for(asyncio.shield(job["task"]), timeout=10)
         except asyncio.TimeoutError:
-            _kill_group(job["proc"], signal.SIGKILL)
+            proc = job.get("proc")
+            if proc and proc.returncode is None:
+                _kill_group(proc, signal.SIGKILL)
             await job["task"]
     return _report(job, full=False)
 
