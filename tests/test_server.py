@@ -60,6 +60,17 @@ def test_handle_event_text_upserts_by_part_id():
     assert job["texts"] == ["hello", "world", "a", "b"]
 
 
+def test_handle_event_text_upserts_mixed_indexed_and_unindexed():
+    job = _new_job()
+    server._handle_event(job, {"type": "text", "part": {"id": "p1", "text": "a"}})
+    server._handle_event(job, {"type": "text", "part": {"text": "b"}})
+    server._handle_event(job, {"type": "text", "part": {"text": "c"}})
+    server._handle_event(job, {"type": "text", "part": {"id": "p1", "text": "a2"}})
+    server._handle_event(job, {"type": "text", "part": {"id": "p1", "text": "a3"}})
+    assert job["texts"] == ["a3", "b", "c"]
+    assert job["text_index"] == {"p1": 0}
+
+
 def test_last_activity_shows_elapsed_since_tool():
     job = _new_job()
     job["tools"].append({"tool": "bash", "status": "completed", "input": {"command": "ls"},
