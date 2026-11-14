@@ -81,11 +81,11 @@ def _handle_event(job, ev):
     elif kind == "error":
         err = ev.get("error") or {}
         job["errors"].append(err.get("message") or json.dumps(err))
-    job["events"].append(_event_summary(kind, ev, part))
+    job["events"].append(_event_summary(kind, ev, part, job))
     del job["events"][: max(0, len(job["events"]) - 50)]  # ring buffer, newest last
 
 
-def _event_summary(kind, ev, part):
+def _event_summary(kind, ev, part, job):
     ts = ev.get("timestamp")
     entry = {"at": round(ts / 1000, 3) if ts else None, "type": kind}
     if kind == "tool_use":
@@ -95,6 +95,8 @@ def _event_summary(kind, ev, part):
         entry["summary"] = _clip(part.get("text", ""), 300)
     elif kind == "step_finish":
         entry["summary"] = f"reason={part.get('reason')} cost={part.get('cost')}"
+    elif kind == "step_start":
+        entry["summary"] = f"step {job['steps']} started"
     elif kind == "error":
         err = ev.get("error") or {}
         entry["summary"] = _clip(err.get("message") or json.dumps(err), 300)

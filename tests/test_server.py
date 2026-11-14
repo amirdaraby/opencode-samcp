@@ -44,7 +44,7 @@ def test_handle_event_tracks_progress_state():
     assert job["step_reason"] == "tool-calls"
     assert job["last_event_type"] == "step_finish"
     assert abs(job["last_event_at"] - time.time()) < 5
-    assert job["events"][0]["type"] == "step_start" and job["events"][0]["at"] == 1.0
+    assert job["events"][0] == {"at": 1.0, "type": "step_start", "summary": "step 1 started"}
     assert job["events"][-1]["summary"].startswith("reason=tool-calls")
 
 
